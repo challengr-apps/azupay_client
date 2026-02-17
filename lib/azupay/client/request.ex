@@ -85,4 +85,39 @@ defmodule Azupay.Client.Request do
       {"content-type", "application/json"}
     ]
   end
+
+  @doc """
+  Extracts pagination params (`nextPageId`, `numberOfRecords`) from a params map,
+  returning `{query_params, remaining_body}`.
+
+  Accepts keys as atoms or strings in the params map, and also as keyword opts
+  (`:next_page_id`, `:number_of_records`) which take precedence.
+  """
+  @spec extract_search_params(map(), keyword()) :: {keyword(), map()}
+  def extract_search_params(params, opts \\ []) do
+    {next_page_id, params} = pop_param(params, :nextPageId)
+    {number_of_records, params} = pop_param(params, :numberOfRecords)
+
+    next_page_id = Keyword.get(opts, :next_page_id, next_page_id)
+    number_of_records = Keyword.get(opts, :number_of_records, number_of_records)
+
+    query =
+      []
+      |> maybe_add(:nextPageId, next_page_id)
+      |> maybe_add(:numberOfRecords, number_of_records)
+
+    {query, params}
+  end
+
+  defp pop_param(params, key) do
+    string_key = Atom.to_string(key)
+
+    case Map.pop(params, key) do
+      {nil, params} -> Map.pop(params, string_key)
+      result -> result
+    end
+  end
+
+  defp maybe_add(list, _key, nil), do: list
+  defp maybe_add(list, key, value), do: [{key, value} | list]
 end

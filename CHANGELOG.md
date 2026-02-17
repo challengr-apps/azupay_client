@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-17
+
+### Changed
+
+- Webhook support reworked for transaction-level webhooks only
+- `Azupay.Webhook.Handler` callback is now `handle_event/3` — receives a context map with `:environment` and `:authorization`
+- `Azupay.Webhook.Plug` no longer verifies authentication; the handler is responsible for looking up and verifying the per-transaction `Authorization` header value
+- `Azupay.Webhook.Plug` now requires `:environment` option (e.g. `:uat`, `:prod`) instead of `:auth`
+
+### Removed
+
+- `Azupay.Webhook.TokenEndpoint` — OAuth2 token endpoint (client-level webhooks no longer supported)
+- `Azupay.Webhook.Token` — JWT generation/verification
+- OAuth2 and API key authentication from `Azupay.Webhook.Plug`
+- `joken` dependency
+
 ## [0.2.0] - 2026-02-17
 
 ### Added

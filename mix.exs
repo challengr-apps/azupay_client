@@ -1,7 +1,7 @@
 defmodule Azupay.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @source_url "https://github.com/challengr-apps/azupay_client"
 
   def project do

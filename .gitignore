@@ -24,3 +24,4 @@ azupay-*.tar
 .env
 scratchpad.ex
 .DS_Store
+azupay-*

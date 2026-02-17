@@ -1,13 +1,34 @@
 defmodule Azupay.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @source_url "https://github.com/challengr-apps/azupay_client"
+
   def project do
     [
       app: :azupay,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      description: "Elixir client for the AzuPay Payments API",
+      package: package(),
+      name: "Azupay",
+      source_url: @source_url,
+      homepage_url: "https://hexdocs.pm/azupay",
+      docs: [
+        main: "readme",
+        extras: ["README.md", "LICENSE", "CHANGELOG.md"],
+        source_ref: "v#{@version}"
+      ]
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{"GitHub" => @source_url},
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 

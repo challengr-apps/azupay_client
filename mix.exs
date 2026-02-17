@@ -1,7 +1,7 @@
 defmodule Azupay.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/challengr-apps/azupay_client"
 
   def project do
@@ -43,7 +43,8 @@ defmodule Azupay.MixProject do
     [
       {:req, "~> 0.5.0"},
       {:jason, "~> 1.4"},
-      {:plug, "~> 1.14", only: :test},
+      {:joken, "~> 2.6", optional: true},
+      {:plug, "~> 1.14", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end

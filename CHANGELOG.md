@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-02-17
+
+### Added
+
+- Webhook support for receiving AzuPay payment notifications (`Azupay.Webhook`)
+- `Azupay.Webhook.Plug` - Plug for receiving and verifying webhook requests
+- `Azupay.Webhook.TokenEndpoint` - OAuth2 token endpoint Plug (Client Credentials grant)
+- `Azupay.Webhook.Handler` - Behaviour for implementing webhook event handlers
+- `Azupay.Webhook.Token` - JWT generation and verification (HS256)
+- Support for both API key and OAuth2 Bearer token authentication, including simultaneously
+- New dependencies: `joken` (optional), `plug` promoted from test-only to optional runtime
+
 ## [0.1.0] - 2026-02-17
 
 ### Added

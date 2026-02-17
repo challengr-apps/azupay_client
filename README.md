@@ -9,7 +9,7 @@ Add `azupay` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:azupay, "~> 0.1.0"}
+    {:azupay, "~> 0.2.0"}
   ]
 end
 ```
@@ -276,6 +276,80 @@ Initiate payer approval flow for PayTo agreements.
 | `Azupay.Client.ApiKeys` | API key management |
 | `Azupay.Client.Clients` | Sub-client management |
 | `Azupay.Client.PayIdDomains` | PayID domain configuration |
+
+## Webhooks
+
+AzuPay sends webhook notifications when payment entity statuses change. This library provides Plug modules to receive and authenticate these webhooks.
+
+AzuPay supports two authentication modes — a simple API key, and an OAuth2 Client Credentials flow where AzuPay fetches a Bearer token from your token endpoint before sending the webhook. You can use either or both simultaneously.
+
+### 1. Implement a handler
+
+```elixir
+defmodule MyApp.AzupayWebhookHandler do
+  @behaviour Azupay.Webhook.Handler
+
+  @impl true
+  def handle_event("PaymentRequest", payload) do
+    # Handle payment request status update
+    :ok
+  end
+
+  def handle_event("Payment", payload) do
+    # Handle payment status update
+    :ok
+  end
+
+  def handle_event(_type, _payload) do
+    # Gracefully ignore unknown event types
+    :ok
+  end
+end
+```
+
+### 2. Mount the plugs in your router
+
+**API key auth only:**
+
+```elixir
+forward "/webhooks/azupay", Azupay.Webhook.Plug,
+  auth: {:api_key, System.get_env("AZUPAY_WEBHOOK_KEY")},
+  handler: MyApp.AzupayWebhookHandler
+```
+
+**OAuth2 auth** (AzuPay fetches tokens from your endpoint):
+
+```elixir
+# Token endpoint — AzuPay calls this to obtain Bearer tokens
+forward "/webhooks/azupay/token", Azupay.Webhook.TokenEndpoint,
+  client_id: "azupay-client",
+  client_secret: System.get_env("AZUPAY_WEBHOOK_SECRET"),
+  signing_key: System.get_env("WEBHOOK_SIGNING_KEY")
+
+# Webhook receiver — verifies the Bearer token
+forward "/webhooks/azupay", Azupay.Webhook.Plug,
+  auth: {:oauth2, signing_key: System.get_env("WEBHOOK_SIGNING_KEY")},
+  handler: MyApp.AzupayWebhookHandler
+```
+
+**Both modes** (accepts either API key or OAuth2 Bearer token):
+
+```elixir
+forward "/webhooks/azupay", Azupay.Webhook.Plug,
+  auth: [
+    {:api_key, System.get_env("AZUPAY_WEBHOOK_KEY")},
+    {:oauth2, signing_key: System.get_env("WEBHOOK_SIGNING_KEY")}
+  ],
+  handler: MyApp.AzupayWebhookHandler
+```
+
+### Important notes
+
+- Your webhook endpoint must respond within **5 seconds** (AzuPay requirement).
+- AzuPay delivers webhooks **at least once** — handle duplicates gracefully.
+- Webhooks may arrive **out of order** — don't assume sequential delivery.
+- The `signing_key` must be the same in both `TokenEndpoint` and `Webhook.Plug`.
+- Webhook support requires the optional `joken` and `plug` dependencies.
 
 ## Error Handling
 

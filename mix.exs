@@ -43,7 +43,6 @@ defmodule Azupay.MixProject do
     [
       {:req, "~> 0.5.0"},
       {:jason, "~> 1.4"},
-      {:joken, "~> 2.6", optional: true},
       {:plug, "~> 1.14", optional: true},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]

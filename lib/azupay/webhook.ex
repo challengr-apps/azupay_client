@@ -5,48 +5,32 @@ defmodule Azupay.Webhook do
   AzuPay sends webhook notifications when payment entity statuses change
   (PaymentRequest, Payment, PaymentAgreement, PaymentInitiation, etc.).
 
-  ## Authentication Modes
+  ## Transaction-Level Webhooks
 
-  AzuPay supports two authentication modes for webhooks:
+  Webhooks are configured per-transaction by setting the `paymentNotification`
+  field when creating a request (e.g. via `Azupay.Client.PaymentRequests.create/2`):
 
-  ### API Key Authentication
+    * `paymentNotificationEndpointUrl` — your callback URL
+    * `paymentNotificationAuthorizationHeaderValue` — the value AzuPay will send
+      in the `Authorization` header
 
-  The simpler option — AzuPay sends a static API key in the `Authorization` header.
-  Configure per-transaction via the `paymentNotification` field.
+  Since the authorization value is unique per transaction, the plug does **not**
+  verify it — your handler must look it up and verify it. See
+  `Azupay.Webhook.Handler` for details.
 
-      forward "/webhooks/azupay", Azupay.Webhook.Plug,
-        auth: {:api_key, "my-webhook-key"},
+  ## Setup
+
+  Mount the plug once per environment. Each mount receives the environment atom
+  in the handler context, so your handler can use the appropriate database or
+  config for that environment.
+
+      # In your Phoenix router or Plug.Router
+      forward "/webhooks/azupay/uat", Azupay.Webhook.Plug,
+        environment: :uat,
         handler: MyApp.AzupayWebhookHandler
 
-  ### OAuth2 Authentication
-
-  AzuPay acts as an OAuth2 client: before sending a webhook, it requests a Bearer
-  token from your token endpoint using the Client Credentials grant, then sends
-  the webhook with that token. You need to mount two plugs:
-
-      # Token endpoint — AzuPay fetches tokens from here
-      forward "/webhooks/azupay/token", Azupay.Webhook.TokenEndpoint,
-        client_id: "azupay-client",
-        client_secret: System.get_env("AZUPAY_WEBHOOK_SECRET"),
-        signing_key: System.get_env("WEBHOOK_SIGNING_KEY")
-
-      # Webhook receiver — verifies the Bearer token
-      forward "/webhooks/azupay", Azupay.Webhook.Plug,
-        auth: {:oauth2, signing_key: System.get_env("WEBHOOK_SIGNING_KEY")},
-        handler: MyApp.AzupayWebhookHandler
-
-  The `signing_key` must be the same in both plugs.
-
-  ### Both Modes
-
-  You can accept both API key and OAuth2 webhooks on the same endpoint by
-  passing a list of auth methods:
-
-      forward "/webhooks/azupay", Azupay.Webhook.Plug,
-        auth: [
-          {:api_key, "my-webhook-key"},
-          {:oauth2, signing_key: System.get_env("WEBHOOK_SIGNING_KEY")}
-        ],
+      forward "/webhooks/azupay/prod", Azupay.Webhook.Plug,
+        environment: :prod,
         handler: MyApp.AzupayWebhookHandler
 
   ## Handling Events
@@ -57,12 +41,24 @@ defmodule Azupay.Webhook do
         @behaviour Azupay.Webhook.Handler
 
         @impl true
-        def handle_event("PaymentRequest", payload) do
-          # Handle payment request status update
-          :ok
+        def handle_event("PaymentRequest", payload, context) do
+          with :ok <- verify_authorization(payload, context) do
+            # Process payment request status update
+            :ok
+          end
         end
 
-        def handle_event(_type, _payload), do: :ok
+        def handle_event(_type, _payload, _context), do: :ok
+
+        defp verify_authorization(payload, %{authorization: auth}) do
+          expected = lookup_expected_auth(payload["uniqueReference"])
+
+          if Plug.Crypto.secure_compare(auth || "", expected || "") do
+            :ok
+          else
+            {:error, :unauthorized}
+          end
+        end
       end
 
   ## Important Notes

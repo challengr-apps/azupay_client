@@ -3,18 +3,22 @@ defmodule Azupay.Webhook.PlugTest do
   import Plug.Test
   import Plug.Conn
 
-  alias Azupay.Webhook.Token
-
-  @signing_key "test-signing-key-at-least-32-chars!"
-  @api_key "test-webhook-api-key"
-
   defmodule TestHandler do
     @behaviour Azupay.Webhook.Handler
 
     @impl true
-    def handle_event(event_type, payload) do
-      send(self(), {:webhook_received, event_type, payload})
+    def handle_event(event_type, payload, context) do
+      send(self(), {:webhook_received, event_type, payload, context})
       :ok
+    end
+  end
+
+  defmodule UnauthorizedHandler do
+    @behaviour Azupay.Webhook.Handler
+
+    @impl true
+    def handle_event(_event_type, _payload, _context) do
+      {:error, :unauthorized}
     end
   end
 
@@ -22,124 +26,64 @@ defmodule Azupay.Webhook.PlugTest do
     @behaviour Azupay.Webhook.Handler
 
     @impl true
-    def handle_event(_event_type, _payload) do
+    def handle_event(_event_type, _payload, _context) do
       {:error, :processing_failed}
     end
   end
 
-  describe "API key auth" do
-    @api_key_opts Azupay.Webhook.Plug.init(
-                    auth: {:api_key, @api_key},
-                    handler: TestHandler
-                  )
+  describe "successful dispatch" do
+    @opts Azupay.Webhook.Plug.init(
+            environment: :uat,
+            handler: TestHandler
+          )
 
-    test "accepts valid API key and dispatches to handler" do
+    test "dispatches event with environment and authorization in context" do
       payload = %{"entityType" => "PaymentRequest", "status" => "completed", "id" => "pr-123"}
 
       conn =
         conn(:post, "/", Jason.encode!(payload))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", @api_key)
-        |> Azupay.Webhook.Plug.call(@api_key_opts)
+        |> put_req_header("authorization", "my-secret-key")
+        |> Azupay.Webhook.Plug.call(@opts)
 
       assert conn.status == 200
-      assert_received {:webhook_received, "PaymentRequest", ^payload}
+
+      assert_received {:webhook_received, "PaymentRequest", ^payload,
+                       %{environment: :uat, authorization: "my-secret-key"}}
     end
 
-    test "rejects invalid API key" do
-      conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "wrong-key")
-        |> Azupay.Webhook.Plug.call(@api_key_opts)
-
-      assert conn.status == 401
-    end
-
-    test "rejects missing Authorization header" do
-      conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
-        |> put_req_header("content-type", "application/json")
-        |> Azupay.Webhook.Plug.call(@api_key_opts)
-
-      assert conn.status == 401
-    end
-  end
-
-  describe "OAuth2 auth" do
-    @oauth2_opts Azupay.Webhook.Plug.init(
-                   auth: {:oauth2, signing_key: @signing_key},
-                   handler: TestHandler
-                 )
-
-    test "accepts valid Bearer JWT and dispatches to handler" do
-      {:ok, token, _ttl} = Token.generate(@signing_key)
-      payload = %{"entityType" => "Payment", "status" => "settled", "id" => "pay-456"}
+    test "passes nil authorization when header is missing" do
+      payload = %{"entityType" => "Payment", "status" => "settled"}
 
       conn =
         conn(:post, "/", Jason.encode!(payload))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "Bearer #{token}")
-        |> Azupay.Webhook.Plug.call(@oauth2_opts)
+        |> Azupay.Webhook.Plug.call(@opts)
 
       assert conn.status == 200
-      assert_received {:webhook_received, "Payment", ^payload}
+
+      assert_received {:webhook_received, "Payment", ^payload,
+                       %{environment: :uat, authorization: nil}}
     end
 
-    test "rejects expired Bearer JWT" do
-      {:ok, token, _ttl} = Token.generate(@signing_key, ttl: -1)
+    test "passes the configured environment to the handler" do
+      prod_opts =
+        Azupay.Webhook.Plug.init(
+          environment: :prod,
+          handler: TestHandler
+        )
+
+      payload = %{"entityType" => "Payment", "status" => "settled"}
 
       conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
+        conn(:post, "/", Jason.encode!(payload))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "Bearer #{token}")
-        |> Azupay.Webhook.Plug.call(@oauth2_opts)
+        |> Azupay.Webhook.Plug.call(prod_opts)
 
-      assert conn.status == 401
-    end
+      assert conn.status == 200
 
-    test "rejects JWT signed with wrong key" do
-      {:ok, token, _ttl} = Token.generate("different-key-that-is-long-enough!")
-
-      conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "Bearer #{token}")
-        |> Azupay.Webhook.Plug.call(@oauth2_opts)
-
-      assert conn.status == 401
-    end
-
-    test "rejects non-Bearer Authorization header" do
-      conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "Basic abc123")
-        |> Azupay.Webhook.Plug.call(@oauth2_opts)
-
-      assert conn.status == 401
-    end
-  end
-
-  describe "request handling" do
-    @api_key_opts Azupay.Webhook.Plug.init(
-                    auth: {:api_key, @api_key},
-                    handler: TestHandler
-                  )
-
-    test "returns 405 for non-POST methods" do
-      conn = conn(:get, "/") |> Azupay.Webhook.Plug.call(@api_key_opts)
-      assert conn.status == 405
-    end
-
-    test "returns 400 for invalid JSON body" do
-      conn =
-        conn(:post, "/", "not valid json")
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", @api_key)
-        |> Azupay.Webhook.Plug.call(@api_key_opts)
-
-      assert conn.status == 400
+      assert_received {:webhook_received, "Payment", ^payload,
+                       %{environment: :prod, authorization: nil}}
     end
 
     test "uses 'unknown' when entityType is missing from payload" do
@@ -148,17 +92,16 @@ defmodule Azupay.Webhook.PlugTest do
       conn =
         conn(:post, "/", Jason.encode!(payload))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", @api_key)
-        |> Azupay.Webhook.Plug.call(@api_key_opts)
+        |> Azupay.Webhook.Plug.call(@opts)
 
       assert conn.status == 200
-      assert_received {:webhook_received, "unknown", ^payload}
+      assert_received {:webhook_received, "unknown", ^payload, %{environment: :uat}}
     end
 
     test "supports custom event_type_key" do
       opts =
         Azupay.Webhook.Plug.init(
-          auth: {:api_key, @api_key},
+          environment: :uat,
           handler: TestHandler,
           event_type_key: "type"
         )
@@ -168,76 +111,64 @@ defmodule Azupay.Webhook.PlugTest do
       conn =
         conn(:post, "/", Jason.encode!(payload))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", @api_key)
         |> Azupay.Webhook.Plug.call(opts)
 
       assert conn.status == 200
-      assert_received {:webhook_received, "PaymentAgreement", ^payload}
-    end
-  end
-
-  describe "both auth modes" do
-    @both_opts Azupay.Webhook.Plug.init(
-                 auth: [
-                   {:api_key, @api_key},
-                   {:oauth2, signing_key: @signing_key}
-                 ],
-                 handler: TestHandler
-               )
-
-    test "accepts valid API key when both modes configured" do
-      payload = %{"entityType" => "PaymentRequest", "status" => "completed"}
-
-      conn =
-        conn(:post, "/", Jason.encode!(payload))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", @api_key)
-        |> Azupay.Webhook.Plug.call(@both_opts)
-
-      assert conn.status == 200
-      assert_received {:webhook_received, "PaymentRequest", ^payload}
-    end
-
-    test "accepts valid Bearer JWT when both modes configured" do
-      {:ok, token, _ttl} = Token.generate(@signing_key)
-      payload = %{"entityType" => "Payment", "status" => "settled"}
-
-      conn =
-        conn(:post, "/", Jason.encode!(payload))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "Bearer #{token}")
-        |> Azupay.Webhook.Plug.call(@both_opts)
-
-      assert conn.status == 200
-      assert_received {:webhook_received, "Payment", ^payload}
-    end
-
-    test "rejects invalid credentials when both modes configured" do
-      conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "wrong-key")
-        |> Azupay.Webhook.Plug.call(@both_opts)
-
-      assert conn.status == 401
+      assert_received {:webhook_received, "PaymentAgreement", ^payload, %{environment: :uat}}
     end
   end
 
   describe "handler errors" do
-    test "returns 500 when handler returns error" do
+    test "returns 401 when handler returns {:error, :unauthorized}" do
       opts =
         Azupay.Webhook.Plug.init(
-          auth: {:api_key, @api_key},
+          environment: :uat,
+          handler: UnauthorizedHandler
+        )
+
+      conn =
+        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(opts)
+
+      assert conn.status == 401
+      assert Jason.decode!(conn.resp_body) == %{"error" => "unauthorized"}
+    end
+
+    test "returns 500 when handler returns {:error, reason}" do
+      opts =
+        Azupay.Webhook.Plug.init(
+          environment: :uat,
           handler: ErrorHandler
         )
 
       conn =
         conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
         |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", @api_key)
         |> Azupay.Webhook.Plug.call(opts)
 
       assert conn.status == 500
+    end
+  end
+
+  describe "request validation" do
+    @opts Azupay.Webhook.Plug.init(
+            environment: :uat,
+            handler: TestHandler
+          )
+
+    test "returns 405 for non-POST methods" do
+      conn = conn(:get, "/") |> Azupay.Webhook.Plug.call(@opts)
+      assert conn.status == 405
+    end
+
+    test "returns 400 for invalid JSON body" do
+      conn =
+        conn(:post, "/", "not valid json")
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 400
     end
   end
 end

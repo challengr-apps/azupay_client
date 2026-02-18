@@ -9,6 +9,7 @@ defmodule Azupay.MixProject do
       app: :azupay,
       version: @version,
       elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: "Elixir client for the AzuPay Payments API",
@@ -39,11 +40,17 @@ defmodule Azupay.MixProject do
     ]
   end
 
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
   defp deps do
     [
       {:req, "~> 0.5.0"},
       {:jason, "~> 1.4"},
       {:plug, "~> 1.14", optional: true},
+      {:bandit, "~> 1.0", optional: true},
+      {:ecto_sql, "~> 3.10", optional: true},
+      {:postgrex, ">= 0.0.0", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end

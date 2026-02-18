@@ -361,6 +361,131 @@ case Azupay.Client.PaymentRequests.create(client, params) do
 end
 ```
 
+## Mock Server
+
+A built-in mock server provides a local HTTP implementation of the AzuPay API for integration testing and development without hitting real environments. It uses Ecto/Postgres for persistent storage and Bandit as the HTTP server.
+
+Currently supported APIs: **Payment Requests** (create, get, delete, refund, search).
+
+### Setup
+
+Add the optional dependencies to your `mix.exs`:
+
+```elixir
+{:bandit, "~> 1.0"},
+{:ecto_sql, "~> 3.10"},
+{:postgrex, ">= 0.0.0"}
+```
+
+Create a migration:
+
+```elixir
+defmodule MyApp.Repo.Migrations.AddAzupayMockServer do
+  use Ecto.Migration
+
+  def up, do: Azupay.MockServer.Migrations.up(version: 1)
+  def down, do: Azupay.MockServer.Migrations.down(version: 1)
+end
+```
+
+Run `mix ecto.migrate`.
+
+### Configuration
+
+```elixir
+# config/test.exs or config/dev.exs
+config :azupay, :mock_server,
+  enabled: true,
+  port: 4502,
+  repo: MyApp.Repo
+
+# Point the client at the mock server
+config :azupay,
+  environments: [
+    uat: [
+      base_url: "http://localhost:4502/v1",
+      api_key: "test_api_key",
+      client_id: "test_client_id"
+    ]
+  ]
+```
+
+The mock server starts automatically with your application when `enabled: true` and a `:repo` is configured.
+
+### Embedded Mode (Phoenix)
+
+To serve the mock API through your Phoenix router instead of a standalone server:
+
+```elixir
+config :azupay, :mock_server,
+  enabled: true,
+  embedded: true,
+  base_url: "http://localhost:4000/azupay-mock",
+  repo: MyApp.Repo
+
+# In your Phoenix router
+forward "/azupay-mock", Azupay.MockServer.Router
+```
+
+### Usage in Tests
+
+```elixir
+setup do
+  Azupay.MockServer.reset()
+  :ok
+end
+
+test "creates and retrieves a payment request" do
+  client = Azupay.Client.new(environment: :uat)
+
+  {:ok, created} = Azupay.Client.PaymentRequests.create(client, %{
+    "clientTransactionId" => "txn-001",
+    "paymentDescription" => "Test payment"
+  })
+
+  assert created["paymentRequestId"]
+  assert created["status"] == "WAITING"
+
+  {:ok, fetched} = Azupay.Client.PaymentRequests.get(client, created["paymentRequestId"])
+  assert fetched["clientTransactionId"] == "txn-001"
+end
+```
+
+### Seeding Data
+
+```elixir
+{:ok, pr} = Azupay.MockServer.seed_payment_request(%{
+  "clientTransactionId" => "txn-seed-001",
+  "paymentDescription" => "Seeded payment",
+  "paymentAmount" => 25.00
+})
+```
+
+### Simulation Endpoints
+
+The mock server provides extra endpoints for testing scenarios that require external triggers:
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /mock/simulate/pay/:id` | Simulate a payment received (WAITING → PAID) |
+| `POST /_mock/reset` | Clear all mock data |
+| `GET /_mock/state` | Return all stored payment requests |
+
+```elixir
+# Simulate a payment via HTTP
+Req.post!("http://localhost:4502/mock/simulate/pay/#{payment_request_id}")
+```
+
+### Mock API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/paymentRequest` | Create a payment request |
+| `GET` | `/v1/paymentRequest?id=X` | Get a payment request |
+| `DELETE` | `/v1/paymentRequest?id=X` | Delete a payment request |
+| `POST` | `/v1/paymentRequest/refund?id=X` | Refund a payment request |
+| `POST` | `/v1/paymentRequest/search` | Search payment requests |
+
 ## Testing
 
 Tests use Req's built-in plug adapter for HTTP mocking (no real HTTP calls):

@@ -154,6 +154,16 @@ if Code.ensure_loaded?(Ecto) do
     defp maybe_apply_cursor(query, _), do: query
 
     @doc """
+    Gets a payment request by PayID.
+    """
+    def get_payment_request_by_pay_id(pay_id) do
+      case repo().one(from(pr in PaymentRequest, where: pr.pay_id == ^pay_id)) do
+        nil -> {:error, :not_found}
+        payment_request -> {:ok, payment_request}
+      end
+    end
+
+    @doc """
     Lists all payment requests.
     """
     def list_payment_requests do

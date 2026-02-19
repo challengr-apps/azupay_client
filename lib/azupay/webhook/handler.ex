@@ -3,9 +3,9 @@ defmodule Azupay.Webhook.Handler do
   Behaviour for handling AzuPay webhook events.
 
   Implement `handle_event/3` to process incoming webhook notifications.
-  The event type is extracted from the payload and passed as the first argument,
-  along with a context map containing the environment and raw `Authorization`
-  header value.
+  The event type is inferred from the top-level keys in the payload and passed
+  as the first argument, along with a context map containing the environment
+  and raw `Authorization` header value.
 
   Your handler is responsible for verifying the `Authorization` header against
   the value you stored when creating the transaction (the
@@ -43,14 +43,14 @@ defmodule Azupay.Webhook.Handler do
 
   ## Event Types
 
-  AzuPay sends notifications for these entity types:
+  The event type is inferred from the top-level keys in the webhook payload:
 
-    * `"PaymentRequest"` — Payment request status updates
-    * `"Payment"` — Payment disbursement status updates
-    * `"PaymentAgreement"` — PayTo agreement status updates
-    * `"PaymentInitiation"` — Payment initiation status updates
-    * `"SweepRequest"` — Sweep request status updates
-    * `"ClientEnabled"` — Client enabled events
+    * `"PaymentRequest"` — Payload contains `PaymentRequest` key
+    * `"Payment"` — Payload contains `Payment` key (also used for sweep requests)
+    * `"PaymentAgreement"` — Payload contains `PaymentAgreement` key
+    * `"PaymentAgreementAmendment"` — Payload contains `PaymentAgreementAmendment` key
+    * `"PaymentInitiation"` — Payload contains `PaymentInitiation` key
+    * `"ClientEnabled"` — Payload contains `client` key
 
   New event types may be added by AzuPay — always handle unknown types gracefully.
 

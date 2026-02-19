@@ -6,6 +6,7 @@ defmodule Azupay.MockServer.State do
 
   alias Azupay.MockServer.Storage
   alias Azupay.MockServer.Schema.PaymentRequest
+  alias Azupay.MockServer.Webhook
 
   @doc """
   Creates a new payment request from API params.
@@ -80,13 +81,30 @@ defmodule Azupay.MockServer.State do
   end
 
   @doc """
+  Gets a payment request by PayID and returns it in API format.
+  """
+  def get_payment_request_by_pay_id(pay_id) do
+    case Storage.get_payment_request_by_pay_id(pay_id) do
+      {:ok, payment_request} -> {:ok, PaymentRequest.to_api_response(payment_request)}
+      {:error, :not_found} = error -> error
+    end
+  end
+
+  @doc """
   Simulates a payment being received for a payment request.
   Transitions status from WAITING to PAID.
   """
   def simulate_payment(id) do
     case Storage.get_payment_request(id) do
-      {:ok, %{status: "WAITING"} = _pr} ->
-        update_payment_request(id, %{status: "COMPLETE"})
+      {:ok, %{status: "WAITING"} = pr} ->
+        case update_payment_request(id, %{status: "COMPLETE"}) do
+          {:ok, api_response} = result ->
+            Webhook.maybe_deliver(pr, api_response)
+            result
+
+          error ->
+            error
+        end
 
       {:ok, %{status: status}} ->
         {:error, {:invalid_state, "Payment request in #{status} state cannot be paid"}}

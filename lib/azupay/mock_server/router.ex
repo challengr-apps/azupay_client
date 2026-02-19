@@ -5,6 +5,7 @@ defmodule Azupay.MockServer.Router do
 
   use Plug.Router
 
+  alias Azupay.MockServer.Handlers.Checkout
   alias Azupay.MockServer.Handlers.PaymentRequests
   alias Azupay.MockServer.Handlers.Simulation
   alias Azupay.MockServer.Responses
@@ -32,6 +33,19 @@ defmodule Azupay.MockServer.Router do
 
   delete "/v1/paymentRequest" do
     PaymentRequests.delete(conn)
+  end
+
+  # Checkout page endpoints
+  get "/mock/checkout" do
+    Checkout.page(conn)
+  end
+
+  get "/mock/checkout/verify" do
+    Checkout.verify(conn)
+  end
+
+  post "/mock/checkout/pay" do
+    Checkout.pay(conn)
   end
 
   # Simulation endpoints

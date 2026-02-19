@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-19
+
+### Added
+
+- Mock server webhook callbacks — when a payment request transitions to COMPLETE, the mock server now sends an async HTTP POST to the configured `paymentNotification` URL with the correct payload and `Authorization` header
+- `Azupay.MockServer.Webhook` module for async webhook delivery via `TaskSupervisor`
+
+### Changed
+
+- `Azupay.Webhook.Plug` now infers the event type from top-level payload keys (e.g. `"PaymentRequest"`, `"Payment"`, `"PaymentAgreement"`) instead of reading a configurable `entityType` field
+- Removed `:event_type_key` option from `Azupay.Webhook.Plug` (no longer needed)
+- `Azupay.Webhook.Plug` now works behind Phoenix's `Plug.Parsers` by using pre-parsed `body_params` when available, falling back to raw body reads for standalone usage
+- Added `"PaymentAgreementAmendment"` to supported webhook event types
+
 ## [0.3.0] - 2026-02-17
 
 ### Changed

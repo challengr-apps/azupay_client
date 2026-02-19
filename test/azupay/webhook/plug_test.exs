@@ -31,29 +31,127 @@ defmodule Azupay.Webhook.PlugTest do
     end
   end
 
+  describe "event type inference" do
+    @opts Azupay.Webhook.Plug.init(
+            environment: :uat,
+            handler: TestHandler
+          )
+
+    test "infers PaymentRequest from top-level key" do
+      payload = %{
+        "PaymentRequest" => %{"clientId" => "C1", "clientTransactionId" => "TX1"},
+        "PaymentRequestStatus" => %{"paymentRequestId" => "pr-123", "status" => "COMPLETE"}
+      }
+
+      conn =
+        conn(:post, "/", Jason.encode!(payload))
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("authorization", "Bearer secret-123")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+
+      assert_received {:webhook_received, "PaymentRequest", ^payload,
+                       %{environment: :uat, authorization: "Bearer secret-123"}}
+    end
+
+    test "infers Payment from top-level key" do
+      payload = %{
+        "Payment" => %{"bsb" => "012306", "accountNumber" => "12345678"},
+        "PaymentStatus" => %{"paymentId" => "pay-456", "status" => "SETTLED"}
+      }
+
+      conn =
+        conn(:post, "/", Jason.encode!(payload))
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+
+      assert_received {:webhook_received, "Payment", ^payload,
+                       %{environment: :uat, authorization: nil}}
+    end
+
+    test "infers PaymentAgreement from top-level key" do
+      payload = %{
+        "PaymentAgreement" => %{"agreementId" => "ag-789"},
+        "PaymentAgreementStatus" => %{"status" => "ACTIVE"}
+      }
+
+      conn =
+        conn(:post, "/", Jason.encode!(payload))
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+      assert_received {:webhook_received, "PaymentAgreement", ^payload, %{environment: :uat}}
+    end
+
+    test "infers PaymentAgreementAmendment from top-level key" do
+      payload = %{
+        "PaymentAgreementAmendment" => %{"amendmentId" => "am-101"},
+        "PaymentAgreementAmendmentStatus" => %{"status" => "ACTIVE"}
+      }
+
+      conn =
+        conn(:post, "/", Jason.encode!(payload))
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+
+      assert_received {:webhook_received, "PaymentAgreementAmendment", ^payload,
+                       %{environment: :uat}}
+    end
+
+    test "infers PaymentInitiation from top-level key" do
+      payload = %{
+        "PaymentInitiation" => %{"initiationId" => "pi-202"},
+        "PaymentInitiationStatus" => %{"status" => "SETTLED"}
+      }
+
+      conn =
+        conn(:post, "/", Jason.encode!(payload))
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+      assert_received {:webhook_received, "PaymentInitiation", ^payload, %{environment: :uat}}
+    end
+
+    test "infers ClientEnabled from client key" do
+      payload = %{"client" => %{"enabled" => true, "id" => "client-303"}}
+
+      conn =
+        conn(:post, "/", Jason.encode!(payload))
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+      assert_received {:webhook_received, "ClientEnabled", ^payload, %{environment: :uat}}
+    end
+
+    test "returns 'unknown' when no known top-level key is present" do
+      payload = %{"someUnknown" => "data"}
+
+      conn =
+        conn(:post, "/", Jason.encode!(payload))
+        |> put_req_header("content-type", "application/json")
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+      assert_received {:webhook_received, "unknown", ^payload, %{environment: :uat}}
+    end
+  end
+
   describe "successful dispatch" do
     @opts Azupay.Webhook.Plug.init(
             environment: :uat,
             handler: TestHandler
           )
 
-    test "dispatches event with environment and authorization in context" do
-      payload = %{"entityType" => "PaymentRequest", "status" => "completed", "id" => "pr-123"}
-
-      conn =
-        conn(:post, "/", Jason.encode!(payload))
-        |> put_req_header("content-type", "application/json")
-        |> put_req_header("authorization", "my-secret-key")
-        |> Azupay.Webhook.Plug.call(@opts)
-
-      assert conn.status == 200
-
-      assert_received {:webhook_received, "PaymentRequest", ^payload,
-                       %{environment: :uat, authorization: "my-secret-key"}}
-    end
-
     test "passes nil authorization when header is missing" do
-      payload = %{"entityType" => "Payment", "status" => "settled"}
+      payload = %{"Payment" => %{}, "PaymentStatus" => %{"status" => "SETTLED"}}
 
       conn =
         conn(:post, "/", Jason.encode!(payload))
@@ -73,7 +171,7 @@ defmodule Azupay.Webhook.PlugTest do
           handler: TestHandler
         )
 
-      payload = %{"entityType" => "Payment", "status" => "settled"}
+      payload = %{"Payment" => %{}, "PaymentStatus" => %{"status" => "SETTLED"}}
 
       conn =
         conn(:post, "/", Jason.encode!(payload))
@@ -85,37 +183,6 @@ defmodule Azupay.Webhook.PlugTest do
       assert_received {:webhook_received, "Payment", ^payload,
                        %{environment: :prod, authorization: nil}}
     end
-
-    test "uses 'unknown' when entityType is missing from payload" do
-      payload = %{"status" => "completed", "id" => "pr-789"}
-
-      conn =
-        conn(:post, "/", Jason.encode!(payload))
-        |> put_req_header("content-type", "application/json")
-        |> Azupay.Webhook.Plug.call(@opts)
-
-      assert conn.status == 200
-      assert_received {:webhook_received, "unknown", ^payload, %{environment: :uat}}
-    end
-
-    test "supports custom event_type_key" do
-      opts =
-        Azupay.Webhook.Plug.init(
-          environment: :uat,
-          handler: TestHandler,
-          event_type_key: "type"
-        )
-
-      payload = %{"type" => "PaymentAgreement", "status" => "active"}
-
-      conn =
-        conn(:post, "/", Jason.encode!(payload))
-        |> put_req_header("content-type", "application/json")
-        |> Azupay.Webhook.Plug.call(opts)
-
-      assert conn.status == 200
-      assert_received {:webhook_received, "PaymentAgreement", ^payload, %{environment: :uat}}
-    end
   end
 
   describe "handler errors" do
@@ -126,8 +193,10 @@ defmodule Azupay.Webhook.PlugTest do
           handler: UnauthorizedHandler
         )
 
+      payload = %{"PaymentRequest" => %{}, "PaymentRequestStatus" => %{"status" => "COMPLETE"}}
+
       conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
+        conn(:post, "/", Jason.encode!(payload))
         |> put_req_header("content-type", "application/json")
         |> Azupay.Webhook.Plug.call(opts)
 
@@ -142,12 +211,41 @@ defmodule Azupay.Webhook.PlugTest do
           handler: ErrorHandler
         )
 
+      payload = %{"Payment" => %{}, "PaymentStatus" => %{"status" => "SETTLED"}}
+
       conn =
-        conn(:post, "/", Jason.encode!(%{"entityType" => "Payment"}))
+        conn(:post, "/", Jason.encode!(payload))
         |> put_req_header("content-type", "application/json")
         |> Azupay.Webhook.Plug.call(opts)
 
       assert conn.status == 500
+    end
+  end
+
+  describe "pre-parsed body (Phoenix)" do
+    @opts Azupay.Webhook.Plug.init(
+            environment: :uat,
+            handler: TestHandler
+          )
+
+    test "uses body_params when body has already been parsed by Plug.Parsers" do
+      payload = %{
+        "PaymentRequest" => %{"clientId" => "C1"},
+        "PaymentRequestStatus" => %{"status" => "COMPLETE"}
+      }
+
+      # Simulate what Phoenix does: body_params is pre-populated, raw body is consumed
+      conn =
+        conn(:post, "/", "")
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("authorization", "Bearer pre-parsed-token")
+        |> Map.put(:body_params, payload)
+        |> Azupay.Webhook.Plug.call(@opts)
+
+      assert conn.status == 200
+
+      assert_received {:webhook_received, "PaymentRequest", ^payload,
+                       %{environment: :uat, authorization: "Bearer pre-parsed-token"}}
     end
   end
 

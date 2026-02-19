@@ -2,17 +2,20 @@ defmodule Azupay.Webhook.Plug do
   @moduledoc """
   Plug for receiving AzuPay webhook notifications.
 
-  Parses the JSON payload, extracts the event type and `Authorization` header,
-  and delegates to your handler module. Authentication is handled by the
-  handler — see `Azupay.Webhook.Handler` for details.
+  Parses the JSON payload, infers the event type from the top-level keys,
+  extracts the `Authorization` header, and delegates to your handler module.
+  Authentication is handled by the handler — see `Azupay.Webhook.Handler`
+  for details.
+
+  The event type is inferred by checking for known top-level keys in the
+  payload (e.g. `"PaymentRequest"`, `"Payment"`, `"PaymentAgreement"`, etc.).
+  If no known key is found, the event type is `"unknown"`.
 
   ## Options
 
     * `:handler` — Module implementing `Azupay.Webhook.Handler` (required)
     * `:environment` — The environment atom, e.g. `:uat` or `:prod` (required).
       Passed to the handler in the context map.
-    * `:event_type_key` — Key to extract the event type from the payload
-      (default: `"entityType"`)
 
   ## Example
 
@@ -34,15 +37,14 @@ defmodule Azupay.Webhook.Plug do
   def init(opts) do
     %{
       handler: Keyword.fetch!(opts, :handler),
-      environment: Keyword.fetch!(opts, :environment),
-      event_type_key: Keyword.get(opts, :event_type_key, "entityType")
+      environment: Keyword.fetch!(opts, :environment)
     }
   end
 
   @impl true
   def call(%{method: "POST"} = conn, config) do
     with {:ok, conn, payload} <- read_json_body(conn) do
-      event_type = Map.get(payload, config.event_type_key, "unknown")
+      event_type = infer_event_type(payload)
       authorization = get_authorization_header(conn)
 
       context = %{
@@ -79,7 +81,25 @@ defmodule Azupay.Webhook.Plug do
     |> halt()
   end
 
-  defp read_json_body(conn) do
+  @event_type_keys [
+    {"PaymentRequest", "PaymentRequest"},
+    {"Payment", "Payment"},
+    {"PaymentAgreement", "PaymentAgreement"},
+    {"PaymentAgreementAmendment", "PaymentAgreementAmendment"},
+    {"PaymentInitiation", "PaymentInitiation"},
+    {"client", "ClientEnabled"}
+  ]
+
+  defp infer_event_type(payload) do
+    Enum.find_value(@event_type_keys, "unknown", fn {key, event_type} ->
+      if Map.has_key?(payload, key), do: event_type
+    end)
+  end
+
+  # When mounted behind Phoenix's Plug.Parsers, the body has already been
+  # read and parsed into conn.body_params. Use that when available, and
+  # fall back to reading the raw body for non-Phoenix usage.
+  defp read_json_body(%{body_params: %Plug.Conn.Unfetched{}} = conn) do
     case Plug.Conn.read_body(conn) do
       {:ok, body, conn} ->
         case Jason.decode(body) do
@@ -91,6 +111,12 @@ defmodule Azupay.Webhook.Plug do
         {:error, reason}
     end
   end
+
+  defp read_json_body(%{body_params: %{} = params} = conn) when params != %{} do
+    {:ok, conn, params}
+  end
+
+  defp read_json_body(_conn), do: {:error, :invalid_json}
 
   defp get_authorization_header(conn) do
     case get_req_header(conn, "authorization") do
